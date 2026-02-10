@@ -1,8 +1,20 @@
 import discord
 from discord import app_commands
 from datetime import datetime
+import asyncpg
 
 TOKEN = 'REMOVED'
+
+DB_CONFIG = {
+    'host': 'localhost',
+    'port': 5432,
+    'database': 'study_manager',
+    'user': 'postgres',
+    'password': '252006'
+}
+
+async def get_db():
+    return await asyncpg.connect(**DB_CONFIG)
 
 class MyBot(discord.Client):
     def __init__(self):
@@ -11,23 +23,66 @@ class MyBot(discord.Client):
         self.tree = app_commands.CommandTree(self)
 
     async def setup_hook(self):
+        await create_tables()
         await self.tree.sync()
         print("Commands synced!")
 
 bot = MyBot()
 
-meetings = []
-meeting_counter = 0
+# ==================== DATABASE SETUP ====================
 
-tasks = []
-task_counter = 0
+async def create_tables():
+    conn = await get_db()
+    try:
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS meetings (
+                id SERIAL PRIMARY KEY,
+                subject TEXT NOT NULL,
+                date TEXT NOT NULL,
+                time TEXT NOT NULL,
+                type TEXT NOT NULL,
+                location TEXT NOT NULL,
+                creator_id BIGINT NOT NULL,
+                creator_name TEXT NOT NULL
+            )
+        ''')
+
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS attendees (
+                meeting_id INTEGER REFERENCES meetings(id),
+                user_id BIGINT NOT NULL,
+                user_name TEXT NOT NULL
+            )
+        ''')
+
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS tasks (
+                id SERIAL PRIMARY KEY,
+                title TEXT NOT NULL,
+                description TEXT NOT NULL,
+                due_date TEXT NOT NULL,
+                due_time TEXT NOT NULL,
+                priority TEXT NOT NULL,
+                assignee_id BIGINT NOT NULL,
+                assignee_name TEXT NOT NULL,
+                creator_id BIGINT NOT NULL,
+                creator_name TEXT NOT NULL,
+                status TEXT DEFAULT 'Pending'
+            )
+        ''')
+        print("Database tables created!")
+    finally:
+        await conn.close()
+
+# ==================== BOT EVENTS ====================
 
 @bot.event
 async def on_ready():
     print(f'{bot.user.name} is online!')
     print('Bot is ready!')
 
-# Modal for Online location
+# ==================== MEETING MODALS ====================
+
 class OnlineLocationModal(discord.ui.Modal, title='Online Meeting Location'):
     location = discord.ui.TextInput(
         label='Voice Channel or Link',
@@ -41,47 +96,38 @@ class OnlineLocationModal(discord.ui.Modal, title='Online Meeting Location'):
         self.meeting_data = meeting_data
 
     async def on_submit(self, interaction: discord.Interaction):
-        global meeting_counter
-        meeting_counter += 1
-        meeting_id = meeting_counter
+        conn = await get_db()
+        try:
+            meeting_id = await conn.fetchval('''
+                INSERT INTO meetings (subject, date, time, type, location, creator_id, creator_name)
+                VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id
+            ''', self.meeting_data['subject'], self.meeting_data['date'],
+                self.meeting_data['time'], 'Online', self.location.value,
+                interaction.user.id, interaction.user.display_name)
 
-        # Save meeting
-        meeting = {
-            'id': meeting_id,
-            'subject': self.meeting_data['subject'],
-            'date': self.meeting_data['date'],
-            'time': self.meeting_data['time'],
-            'type': 'Online',
-            'location': self.location.value,
-            'creator': interaction.user,
-            'creator_mention': interaction.user.mention,
-            'attendees': [interaction.user.id]
-        }
-        meetings.append(meeting)
+            await conn.execute('''
+                INSERT INTO attendees (meeting_id, user_id, user_name)
+                VALUES ($1, $2, $3)
+            ''', meeting_id, interaction.user.id, interaction.user.display_name)
+        finally:
+            await conn.close()
 
-        # Create embed for meeting announcement
         embed = discord.Embed(
-            title=f"📅 New Meeting: {meeting['subject']}",
-            description=f"React with ✅ to join this meeting!",
+            title=f"📅 New Meeting: {self.meeting_data['subject']}",
+            description="Click ✅ Join Meeting to attend!",
             color=discord.Color.blue()
         )
-        embed.add_field(name="📆 Date", value=meeting['date'], inline=True)
-        embed.add_field(name="⏰ Time", value=meeting['time'], inline=True)
-        embed.add_field(name="🌐 Location", value=f"Online - {meeting['location']}", inline=False)
-        embed.add_field(name="👤 Created by", value=meeting['creator_mention'], inline=True)
-        embed.add_field(name="👥 Attendees", value=meeting['creator_mention'], inline=False)
+        embed.add_field(name="📆 Date", value=self.meeting_data['date'], inline=True)
+        embed.add_field(name="⏰ Time", value=self.meeting_data['time'], inline=True)
+        embed.add_field(name="🌐 Location", value=f"Online - {self.location.value}", inline=False)
+        embed.add_field(name="👤 Created by", value=interaction.user.mention, inline=True)
+        embed.add_field(name="👥 Attendees", value=interaction.user.mention, inline=False)
         embed.set_footer(text=f"Meeting ID: {meeting_id}")
 
-        # Send to channel with @everyone ping
-        channel = interaction.channel
-        await channel.send(content="@everyone", embed=embed)
-        
-        await interaction.response.send_message(
-            f"✅ Meeting created successfully! (ID: {meeting_id})",
-            ephemeral=True
-        )
+        await interaction.channel.send(content="@everyone New meeting created!", embed=embed)
+        await interaction.response.send_message(f"✅ Meeting created! (ID: {meeting_id})", ephemeral=True)
 
-# Modal for On-Campus location
+
 class OnCampusLocationModal(discord.ui.Modal, title='On-Campus Meeting Location'):
     location = discord.ui.TextInput(
         label='Building and Room',
@@ -95,47 +141,40 @@ class OnCampusLocationModal(discord.ui.Modal, title='On-Campus Meeting Location'
         self.meeting_data = meeting_data
 
     async def on_submit(self, interaction: discord.Interaction):
-        global meeting_counter
-        meeting_counter += 1
-        meeting_id = meeting_counter
+        conn = await get_db()
+        try:
+            meeting_id = await conn.fetchval('''
+                INSERT INTO meetings (subject, date, time, type, location, creator_id, creator_name)
+                VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id
+            ''', self.meeting_data['subject'], self.meeting_data['date'],
+                self.meeting_data['time'], 'On-Campus', self.location.value,
+                interaction.user.id, interaction.user.display_name)
 
-        # Save meeting
-        meeting = {
-            'id': meeting_id,
-            'subject': self.meeting_data['subject'],
-            'date': self.meeting_data['date'],
-            'time': self.meeting_data['time'],
-            'type': 'On-Campus',
-            'location': self.location.value,
-            'creator': interaction.user,
-            'creator_mention': interaction.user.mention,
-            'attendees': [interaction.user.id]
-        }
-        meetings.append(meeting)
+            await conn.execute('''
+                INSERT INTO attendees (meeting_id, user_id, user_name)
+                VALUES ($1, $2, $3)
+            ''', meeting_id, interaction.user.id, interaction.user.display_name)
+        finally:
+            await conn.close()
 
-        # Create embed for meeting announcement
         embed = discord.Embed(
-            title=f"📅 New Meeting: {meeting['subject']}",
-            description=f"React with ✅ to join this meeting!",
+            title=f"📅 New Meeting: {self.meeting_data['subject']}",
+            description="Click ✅ Join Meeting to attend!",
             color=discord.Color.green()
         )
-        embed.add_field(name="📆 Date", value=meeting['date'], inline=True)
-        embed.add_field(name="⏰ Time", value=meeting['time'], inline=True)
-        embed.add_field(name="🏫 Location", value=f"On-Campus - {meeting['location']}", inline=False)
-        embed.add_field(name="👤 Created by", value=meeting['creator_mention'], inline=True)
-        embed.add_field(name="👥 Attendees", value=meeting['creator_mention'], inline=False)
+        embed.add_field(name="📆 Date", value=self.meeting_data['date'], inline=True)
+        embed.add_field(name="⏰ Time", value=self.meeting_data['time'], inline=True)
+        embed.add_field(name="🏫 Location", value=f"On-Campus - {self.location.value}", inline=False)
+        embed.add_field(name="👤 Created by", value=interaction.user.mention, inline=True)
+        embed.add_field(name="👥 Attendees", value=interaction.user.mention, inline=False)
         embed.set_footer(text=f"Meeting ID: {meeting_id}")
 
-        # Send to channel with @everyone ping
-        channel = interaction.channel
-        await channel.send(content="@everyone", embed=embed)
-        
-        await interaction.response.send_message(
-            f"✅ Meeting created successfully! (ID: {meeting_id})",
-            ephemeral=True
-        )
+        await interaction.channel.send(content="@everyone New meeting created!", embed=embed)
+        await interaction.response.send_message(f"✅ Meeting created! (ID: {meeting_id})", ephemeral=True)
 
-# View for Online/On-Campus buttons
+
+# ==================== MEETING BUTTONS ====================
+
 class LocationView(discord.ui.View):
     def __init__(self, meeting_data):
         super().__init__(timeout=300)
@@ -151,6 +190,9 @@ class LocationView(discord.ui.View):
         modal = OnCampusLocationModal(self.meeting_data)
         await interaction.response.send_modal(modal)
 
+
+# ==================== MEETING COMMANDS ====================
+
 @bot.tree.command(name="create-meeting", description="Create a new study meeting")
 @app_commands.describe(
     subject="What is the meeting about?",
@@ -159,20 +201,15 @@ class LocationView(discord.ui.View):
 )
 async def create_meeting(interaction: discord.Interaction, subject: str, date: str, time: str):
     try:
-        meeting_datetime = datetime.strptime(f"{date} {time}", "%d-%m-%Y %H:%M")
+        datetime.strptime(f"{date} {time}", "%d-%m-%Y %H:%M")
     except ValueError:
         await interaction.response.send_message(
             "❌ Invalid date or time format! Use DD-MM-YYYY for date and HH:MM for time.",
             ephemeral=True
         )
         return
-    
-    meeting_data = {
-        'subject': subject,
-        'date': date,
-        'time': time
-    }
-    
+
+    meeting_data = {'subject': subject, 'date': date, 'time': time}
     view = LocationView(meeting_data)
     await interaction.response.send_message(
         f"Creating meeting: **{subject}**\n📅 {date} at {time}\n\nWhere will this meeting take place?",
@@ -180,7 +217,113 @@ async def create_meeting(interaction: discord.Interaction, subject: str, date: s
         ephemeral=True
     )
 
-# Priority choices for tasks
+
+@bot.tree.command(name="list-meetings", description="View all upcoming meetings")
+async def list_meetings(interaction: discord.Interaction):
+    conn = await get_db()
+    try:
+        all_meetings = await conn.fetch('SELECT * FROM meetings ORDER BY date, time')
+    finally:
+        await conn.close()
+
+    if not all_meetings:
+        await interaction.response.send_message("📅 No meetings found.", ephemeral=True)
+        return
+
+    embed = discord.Embed(
+        title="📅 All Meetings",
+        description=f"Total: {len(all_meetings)} meeting(s)",
+        color=discord.Color.blue()
+    )
+
+    for meeting in all_meetings[:10]:
+        type_emoji = "🌐" if meeting['type'] == "Online" else "🏫"
+        embed.add_field(
+            name=f"ID: {meeting['id']} - {meeting['subject']}",
+            value=f"📆 {meeting['date']} at {meeting['time']}\n{type_emoji} {meeting['type']} - {meeting['location']}\n👤 Created by: {meeting['creator_name']}",
+            inline=False
+        )
+
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+@bot.tree.command(name="join-meeting", description="Join a meeting")
+@app_commands.describe(meeting_id="ID of the meeting to join")
+async def join_meeting(interaction: discord.Interaction, meeting_id: int):
+    conn = await get_db()
+    try:
+        meeting = await conn.fetchrow('SELECT * FROM meetings WHERE id = $1', meeting_id)
+
+        if not meeting:
+            await interaction.response.send_message(f"❌ Meeting {meeting_id} not found.", ephemeral=True)
+            return
+
+        existing = await conn.fetchrow(
+            'SELECT * FROM attendees WHERE meeting_id = $1 AND user_id = $2',
+            meeting_id, interaction.user.id
+        )
+
+        if existing:
+            await interaction.response.send_message("ℹ️ You already joined this meeting!", ephemeral=True)
+            return
+
+        await conn.execute(
+            'INSERT INTO attendees (meeting_id, user_id, user_name) VALUES ($1, $2, $3)',
+            meeting_id, interaction.user.id, interaction.user.display_name
+        )
+
+        attendees = await conn.fetch('SELECT user_name FROM attendees WHERE meeting_id = $1', meeting_id)
+    finally:
+        await conn.close()
+
+    attendee_list = ", ".join([a['user_name'] for a in attendees])
+
+    embed = discord.Embed(
+        title=f"✅ {interaction.user.display_name} joined: {meeting['subject']}",
+        color=discord.Color.green()
+    )
+    embed.add_field(name="📆 Date", value=meeting['date'], inline=True)
+    embed.add_field(name="⏰ Time", value=meeting['time'], inline=True)
+    embed.add_field(name="👥 Attendees", value=attendee_list, inline=False)
+    embed.set_footer(text=f"Meeting ID: {meeting_id}")
+
+    await interaction.channel.send(embed=embed)
+    await interaction.response.send_message(f"✅ You joined meeting {meeting_id}!", ephemeral=True)
+
+
+@bot.tree.command(name="cancel-meeting", description="Cancel your meeting")
+@app_commands.describe(meeting_id="ID of the meeting to cancel")
+async def cancel_meeting(interaction: discord.Interaction, meeting_id: int):
+    conn = await get_db()
+    try:
+        meeting = await conn.fetchrow('SELECT * FROM meetings WHERE id = $1', meeting_id)
+
+        if not meeting:
+            await interaction.response.send_message(f"❌ Meeting {meeting_id} not found.", ephemeral=True)
+            return
+
+        if interaction.user.id != meeting['creator_id']:
+            await interaction.response.send_message(
+                "❌ Only the creator can cancel this meeting.", ephemeral=True
+            )
+            return
+
+        await conn.execute('DELETE FROM attendees WHERE meeting_id = $1', meeting_id)
+        await conn.execute('DELETE FROM meetings WHERE id = $1', meeting_id)
+    finally:
+        await conn.close()
+
+    embed = discord.Embed(
+        title=f"❌ Meeting Cancelled: {meeting['subject']}",
+        description=f"Meeting on {meeting['date']} at {meeting['time']} has been cancelled by {interaction.user.mention}",
+        color=discord.Color.red()
+    )
+    await interaction.channel.send(content="@everyone", embed=embed)
+    await interaction.response.send_message(f"✅ Meeting {meeting_id} cancelled.", ephemeral=True)
+
+
+# ==================== TASK COMMANDS ====================
+
 priority_choices = [
     app_commands.Choice(name="🔴 High", value="High"),
     app_commands.Choice(name="🟠 Medium", value="Medium"),
@@ -204,11 +347,10 @@ async def add_task(
     due_date: str,
     due_time: str,
     priority: app_commands.Choice[str],
-    assignee: discord.User
+    assignee: discord.Member
 ):
-    # Validate date and time format
     try:
-        task_datetime = datetime.strptime(f"{due_date} {due_time}", "%d-%m-%Y %H:%M")
+        datetime.strptime(f"{due_date} {due_time}", "%d-%m-%Y %H:%M")
     except ValueError:
         await interaction.response.send_message(
             "❌ Invalid date or time format! Use DD-MM-YYYY for date and HH:MM for time.",
@@ -216,60 +358,33 @@ async def add_task(
         )
         return
 
-    global task_counter
-    task_counter += 1
-    task_id = task_counter
+    conn = await get_db()
+    try:
+        task_id = await conn.fetchval('''
+            INSERT INTO tasks (title, description, due_date, due_time, priority, assignee_id, assignee_name, creator_id, creator_name)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id
+        ''', title, description, due_date, due_time, priority.value,
+            assignee.id, assignee.display_name,
+            interaction.user.id, interaction.user.display_name)
+    finally:
+        await conn.close()
 
-    # Create task
-    task = {
-        'id': task_id,
-        'title': title,
-        'description': description,
-        'due_date': due_date,
-        'due_time': due_time,
-        'priority': priority.value,
-        'assignee': assignee,
-        'assignee_mention': assignee.mention,
-        'creator': interaction.user,
-        'creator_mention': interaction.user.mention,
-        'status': 'Pending',
-        'created_at': datetime.now()
-    }
-    tasks.append(task)
-
-    # Set color based on priority
-    if priority.value == "High":
-        color = discord.Color.red()
-    elif priority.value == "Medium":
-        color = discord.Color.orange()
-    else:
-        color = discord.Color.green()
-
-    # Create embed for task announcement
     priority_emoji = "🔴" if priority.value == "High" else ("🟠" if priority.value == "Medium" else "🟢")
-    embed = discord.Embed(
-        title=f"📋 New Task: {task['title']}",
-        description=task['description'],
-        color=color
-    )
-    embed.add_field(name="📅 Due Date", value=task['due_date'], inline=True)
-    embed.add_field(name="⏰ Due Time", value=task['due_time'], inline=True)
+    color = discord.Color.red() if priority.value == "High" else (discord.Color.orange() if priority.value == "Medium" else discord.Color.green())
+
+    embed = discord.Embed(title=f"📋 New Task: {title}", description=description, color=color)
+    embed.add_field(name="📅 Due Date", value=due_date, inline=True)
+    embed.add_field(name="⏰ Due Time", value=due_time, inline=True)
     embed.add_field(name="⚡ Priority", value=f"{priority_emoji} {priority.value}", inline=True)
-    embed.add_field(name="👤 Assigned to", value=task['assignee_mention'], inline=True)
-    embed.add_field(name="👤 Created by", value=task['creator_mention'], inline=True)
+    embed.add_field(name="👤 Assigned to", value=assignee.mention, inline=True)
+    embed.add_field(name="👤 Created by", value=interaction.user.mention, inline=True)
     embed.add_field(name="📊 Status", value="⏳ Pending", inline=True)
     embed.set_footer(text=f"Task ID: {task_id}")
 
-    # Send to channel with @everyone ping
-    channel = interaction.channel
-    await channel.send(content="@everyone", embed=embed)
+    await interaction.channel.send(content="@everyone", embed=embed)
+    await interaction.response.send_message(f"✅ Task created! (ID: {task_id})", ephemeral=True)
 
-    await interaction.response.send_message(
-        f"✅ Task created successfully! (ID: {task_id})",
-        ephemeral=True
-    )
 
-# Status choices for listing tasks
 status_choices = [
     app_commands.Choice(name="All Tasks", value="All"),
     app_commands.Choice(name="⏳ Pending", value="Pending"),
@@ -280,166 +395,127 @@ status_choices = [
 @app_commands.describe(status="Filter tasks by status")
 @app_commands.choices(status=status_choices)
 async def list_tasks(interaction: discord.Interaction, status: app_commands.Choice[str] = None):
-    # Default to "All" if no status specified
     filter_status = status.value if status else "All"
 
-    # Filter tasks based on status
-    if filter_status == "All":
-        filtered_tasks = tasks
-    else:
-        filtered_tasks = [task for task in tasks if task['status'] == filter_status]
+    conn = await get_db()
+    try:
+        if filter_status == "All":
+            all_tasks = await conn.fetch('SELECT * FROM tasks ORDER BY due_date, due_time')
+        else:
+            all_tasks = await conn.fetch(
+                'SELECT * FROM tasks WHERE status = $1 ORDER BY due_date, due_time', filter_status
+            )
+    finally:
+        await conn.close()
 
-    # Check if there are any tasks
-    if not filtered_tasks:
-        await interaction.response.send_message(
-            f"📋 No {filter_status.lower()} tasks found.",
-            ephemeral=True
-        )
+    if not all_tasks:
+        await interaction.response.send_message(f"📋 No {filter_status.lower()} tasks found.", ephemeral=True)
         return
 
-    # Create embed for tasks
     embed = discord.Embed(
         title=f"📋 Task List - {filter_status}",
-        description=f"Total: {len(filtered_tasks)} task(s)",
+        description=f"Total: {len(all_tasks)} task(s)",
         color=discord.Color.blue()
     )
 
-    # Add each task as a field (limit to 10 tasks per embed due to Discord limits)
-    for task in filtered_tasks[:10]:
+    for task in all_tasks[:10]:
         priority_emoji = "🔴" if task['priority'] == "High" else ("🟠" if task['priority'] == "Medium" else "🟢")
         status_emoji = "✅" if task['status'] == "Completed" else "⏳"
-
-        task_info = (
-            f"**Description:** {task['description']}\n"
-            f"**Due:** {task['due_date']} at {task['due_time']}\n"
-            f"**Priority:** {priority_emoji} {task['priority']}\n"
-            f"**Assigned to:** {task['assignee_mention']}\n"
-            f"**Status:** {status_emoji} {task['status']}\n"
-            f"**Created by:** {task['creator_mention']}"
-        )
-
         embed.add_field(
             name=f"ID: {task['id']} - {task['title']}",
-            value=task_info,
+            value=(
+                f"**Description:** {task['description']}\n"
+                f"**Due:** {task['due_date']} at {task['due_time']}\n"
+                f"**Priority:** {priority_emoji} {task['priority']}\n"
+                f"**Assigned to:** {task['assignee_name']}\n"
+                f"**Status:** {status_emoji} {task['status']}\n"
+                f"**Created by:** {task['creator_name']}"
+            ),
             inline=False
         )
 
-    if len(filtered_tasks) > 10:
-        embed.set_footer(text=f"Showing first 10 of {len(filtered_tasks)} tasks")
-
     await interaction.response.send_message(embed=embed, ephemeral=True)
+
 
 @bot.tree.command(name="complete-task", description="Mark a task as completed")
 @app_commands.describe(task_id="ID of the task to complete")
 async def complete_task(interaction: discord.Interaction, task_id: int):
-    # Find the task
-    task = None
-    for t in tasks:
-        if t['id'] == task_id:
-            task = t
-            break
+    conn = await get_db()
+    try:
+        task = await conn.fetchrow('SELECT * FROM tasks WHERE id = $1', task_id)
 
-    if not task:
-        await interaction.response.send_message(
-            f"❌ Task with ID {task_id} not found.",
-            ephemeral=True
-        )
-        return
+        if not task:
+            await interaction.response.send_message(f"❌ Task {task_id} not found.", ephemeral=True)
+            return
 
-    # Check if task is already completed
-    if task['status'] == "Completed":
-        await interaction.response.send_message(
-            f"ℹ️ Task {task_id} is already completed.",
-            ephemeral=True
-        )
-        return
+        if task['status'] == "Completed":
+            await interaction.response.send_message(f"ℹ️ Task {task_id} is already completed.", ephemeral=True)
+            return
 
-    # Check permissions: only assignee or creator can complete
-    if interaction.user.id != task['assignee'].id and interaction.user.id != task['creator'].id:
-        await interaction.response.send_message(
-            f"❌ You don't have permission to complete this task. Only the assignee or creator can complete it.",
-            ephemeral=True
-        )
-        return
+        if interaction.user.id != task['assignee_id'] and interaction.user.id != task['creator_id']:
+            await interaction.response.send_message(
+                "❌ Only the assignee or creator can complete this task.", ephemeral=True
+            )
+            return
 
-    # Mark task as completed
-    task['status'] = "Completed"
+        await conn.execute("UPDATE tasks SET status = 'Completed' WHERE id = $1", task_id)
+    finally:
+        await conn.close()
 
-    # Create completion announcement embed
     embed = discord.Embed(
         title=f"✅ Task Completed: {task['title']}",
         description=task['description'],
         color=discord.Color.green()
     )
-    embed.add_field(name="📋 Task ID", value=str(task['id']), inline=True)
+    embed.add_field(name="📋 Task ID", value=str(task_id), inline=True)
     embed.add_field(name="👤 Completed by", value=interaction.user.mention, inline=True)
-    embed.add_field(name="👤 Assigned to", value=task['assignee_mention'], inline=True)
-    embed.set_footer(text="Task marked as completed")
+    embed.add_field(name="👤 Assigned to", value=task['assignee_name'], inline=True)
 
-    # Send announcement to channel
-    channel = interaction.channel
-    await channel.send(embed=embed)
+    await interaction.channel.send(embed=embed)
+    await interaction.response.send_message(f"✅ Task {task_id} marked as completed!", ephemeral=True)
 
-    await interaction.response.send_message(
-        f"✅ Task {task_id} marked as completed!",
-        ephemeral=True
-    )
 
 @bot.tree.command(name="delete-task", description="Delete a task")
 @app_commands.describe(task_id="ID of the task to delete")
 async def delete_task(interaction: discord.Interaction, task_id: int):
-    # Find the task
-    task = None
-    task_index = None
-    for i, t in enumerate(tasks):
-        if t['id'] == task_id:
-            task = t
-            task_index = i
-            break
+    conn = await get_db()
+    try:
+        task = await conn.fetchrow('SELECT * FROM tasks WHERE id = $1', task_id)
 
-    if not task:
-        await interaction.response.send_message(
-            f"❌ Task with ID {task_id} not found.",
-            ephemeral=True
-        )
-        return
+        if not task:
+            await interaction.response.send_message(f"❌ Task {task_id} not found.", ephemeral=True)
+            return
 
-    # Check permissions: only creator or admins can delete
-    is_creator = interaction.user.id == task['creator'].id
-    is_admin = interaction.user.guild_permissions.administrator
+        is_creator = interaction.user.id == task['creator_id']
+        is_admin = interaction.user.guild_permissions.administrator
 
-    if not is_creator and not is_admin:
-        await interaction.response.send_message(
-            f"❌ You don't have permission to delete this task. Only the creator or administrators can delete it.",
-            ephemeral=True
-        )
-        return
+        if not is_creator and not is_admin:
+            await interaction.response.send_message(
+                "❌ Only the creator or an admin can delete this task.", ephemeral=True
+            )
+            return
 
-    # Delete the task
-    deleted_task = tasks.pop(task_index)
+        await conn.execute('DELETE FROM tasks WHERE id = $1', task_id)
+    finally:
+        await conn.close()
 
-    # Send confirmation to channel
     embed = discord.Embed(
-        title=f"🗑️ Task Deleted: {deleted_task['title']}",
-        description=f"Task ID {task_id} has been deleted by {interaction.user.mention}",
+        title=f"🗑️ Task Deleted: {task['title']}",
+        description=f"Task ID {task_id} deleted by {interaction.user.mention}",
         color=discord.Color.red()
     )
-    embed.add_field(name="📋 Task", value=deleted_task['description'], inline=False)
+    await interaction.channel.send(embed=embed)
+    await interaction.response.send_message(f"✅ Task {task_id} deleted!", ephemeral=True)
 
-    channel = interaction.channel
-    await channel.send(embed=embed)
 
-    await interaction.response.send_message(
-        f"✅ Task {task_id} has been deleted successfully!",
-        ephemeral=True
-    )
+# ==================== FUN COMMANDS ====================
 
 @bot.tree.command(name="ping", description="Test if bot is working")
 async def ping(interaction: discord.Interaction):
     await interaction.response.send_message("🏓 Pong! Bot is working!")
 
-@bot.tree.command(name="claudiu", description="asd")
-async def thea(interaction: discord.Interaction):
+@bot.tree.command(name="claudiu", description="easter egg")
+async def claudiu(interaction: discord.Interaction):
     await interaction.response.send_message("You have a fatass")
 
 bot.run(TOKEN)
