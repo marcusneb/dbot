@@ -1,6 +1,7 @@
 import discord
 from discord import app_commands
-from datetime import datetime
+from discord.ext import tasks
+from datetime import datetime, timedelta
 import asyncpg
 
 TOKEN = 'REMOVED'
@@ -10,7 +11,7 @@ DB_CONFIG = {
     'port': 5432,
     'database': 'study_manager',
     'user': 'postgres',
-    'password': '252006'
+    'password': '252006'  
 }
 
 async def get_db():
@@ -25,6 +26,7 @@ class MyBot(discord.Client):
     async def setup_hook(self):
         await create_tables()
         await self.tree.sync()
+        check_reminders.start()  # Start the reminder background task
         print("Commands synced!")
 
 bot = MyBot()
@@ -43,7 +45,9 @@ async def create_tables():
                 type TEXT NOT NULL,
                 location TEXT NOT NULL,
                 creator_id BIGINT NOT NULL,
-                creator_name TEXT NOT NULL
+                creator_name TEXT NOT NULL,
+                channel_id BIGINT,
+                reminded BOOLEAN DEFAULT FALSE
             )
         ''')
 
@@ -70,9 +74,77 @@ async def create_tables():
                 status TEXT DEFAULT 'Pending'
             )
         ''')
-        print("Database tables created!")
+        print("Database tables ready!")
     finally:
         await conn.close()
+
+# ==================== AUTO REMINDER ====================
+
+@tasks.loop(minutes=1)  # Runs every minute
+async def check_reminders():
+    now = datetime.now()
+    reminder_time = now + timedelta(hours=24)  # 24 hours from now
+
+    conn = await get_db()
+    try:
+        # Find meetings happening in ~24 hours that haven't been reminded yet
+        meetings = await conn.fetch('''
+            SELECT * FROM meetings
+            WHERE reminded = FALSE
+        ''')
+
+        for meeting in meetings:
+            # Parse meeting datetime
+            try:
+                meeting_dt = datetime.strptime(
+                    f"{meeting['date']} {meeting['time']}", "%d-%m-%Y %H:%M"
+                )
+            except:
+                continue
+
+            # Check if meeting is within the next 24 hours (with 1 min tolerance)
+            time_diff = meeting_dt - now
+            hours_until = time_diff.total_seconds() / 3600
+
+            if 23.9 <= hours_until <= 24.1:  # Between 23h54m and 24h6m
+                # Get the channel
+                channel = bot.get_channel(meeting['channel_id'])
+                if channel:
+                    # Get attendees
+                    attendees = await conn.fetch(
+                        'SELECT user_name FROM attendees WHERE meeting_id = $1',
+                        meeting['id']
+                    )
+                    attendee_list = ", ".join([a['user_name'] for a in attendees]) or "No attendees yet"
+
+                    # Send reminder
+                    type_emoji = "🌐" if meeting['type'] == "Online" else "🏫"
+                    embed = discord.Embed(
+                        title=f"⏰ Meeting Reminder: {meeting['subject']}",
+                        description="This meeting is happening **tomorrow**!",
+                        color=discord.Color.yellow()
+                    )
+                    embed.add_field(name="📆 Date", value=meeting['date'], inline=True)
+                    embed.add_field(name="⏰ Time", value=meeting['time'], inline=True)
+                    embed.add_field(name=f"{type_emoji} Location", value=f"{meeting['type']} - {meeting['location']}", inline=False)
+                    embed.add_field(name="👥 Attendees", value=attendee_list, inline=False)
+                    embed.set_footer(text=f"Meeting ID: {meeting['id']}")
+
+                    await channel.send(content="@everyone", embed=embed)
+
+                    # Mark as reminded so we don't send it again
+                    await conn.execute(
+                        'UPDATE meetings SET reminded = TRUE WHERE id = $1',
+                        meeting['id']
+                    )
+                    print(f"Reminder sent for meeting {meeting['id']}: {meeting['subject']}")
+
+    finally:
+        await conn.close()
+
+@check_reminders.before_loop
+async def before_check_reminders():
+    await bot.wait_until_ready()  # Wait for bot to be ready before starting
 
 # ==================== BOT EVENTS ====================
 
@@ -80,6 +152,7 @@ async def create_tables():
 async def on_ready():
     print(f'{bot.user.name} is online!')
     print('Bot is ready!')
+    print('Auto-reminder is running!')
 
 # ==================== MEETING MODALS ====================
 
@@ -99,11 +172,12 @@ class OnlineLocationModal(discord.ui.Modal, title='Online Meeting Location'):
         conn = await get_db()
         try:
             meeting_id = await conn.fetchval('''
-                INSERT INTO meetings (subject, date, time, type, location, creator_id, creator_name)
-                VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id
+                INSERT INTO meetings (subject, date, time, type, location, creator_id, creator_name, channel_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id
             ''', self.meeting_data['subject'], self.meeting_data['date'],
                 self.meeting_data['time'], 'Online', self.location.value,
-                interaction.user.id, interaction.user.display_name)
+                interaction.user.id, interaction.user.display_name,
+                interaction.channel_id)  # Save channel ID!
 
             await conn.execute('''
                 INSERT INTO attendees (meeting_id, user_id, user_name)
@@ -144,11 +218,12 @@ class OnCampusLocationModal(discord.ui.Modal, title='On-Campus Meeting Location'
         conn = await get_db()
         try:
             meeting_id = await conn.fetchval('''
-                INSERT INTO meetings (subject, date, time, type, location, creator_id, creator_name)
-                VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id
+                INSERT INTO meetings (subject, date, time, type, location, creator_id, creator_name, channel_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id
             ''', self.meeting_data['subject'], self.meeting_data['date'],
                 self.meeting_data['time'], 'On-Campus', self.location.value,
-                interaction.user.id, interaction.user.display_name)
+                interaction.user.id, interaction.user.display_name,
+                interaction.channel_id)  # Save channel ID!
 
             await conn.execute('''
                 INSERT INTO attendees (meeting_id, user_id, user_name)
