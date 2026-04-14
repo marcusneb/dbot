@@ -82,7 +82,7 @@ async def create_tables():
     finally:
         await conn.close()
 
-# ==================== AUTO REMINDER ====================
+
 
 @tasks.loop(minutes=1)  # Runs every minute
 async def check_reminders():
@@ -150,7 +150,6 @@ async def check_reminders():
 async def before_check_reminders():
     await bot.wait_until_ready()  # Wait for bot to be ready before starting
 
-# ==================== BOT EVENTS ====================
 
 @bot.event
 async def on_ready():
@@ -158,7 +157,7 @@ async def on_ready():
     print('Bot is ready!')
     print('Auto-reminder is running!')
 
-# ==================== MEETING MODALS ====================
+
 
 class OnlineLocationModal(discord.ui.Modal, title='Online Meeting Location'):
     location = discord.ui.TextInput(
@@ -252,7 +251,7 @@ class OnCampusLocationModal(discord.ui.Modal, title='On-Campus Meeting Location'
         await interaction.response.send_message(f"✅ Meeting created! (ID: {meeting_id})", ephemeral=True)
 
 
-# ==================== MEETING BUTTONS ====================
+
 
 class LocationView(discord.ui.View):
     def __init__(self, meeting_data):
@@ -270,7 +269,7 @@ class LocationView(discord.ui.View):
         await interaction.response.send_modal(modal)
 
 
-# ==================== MEETING COMMANDS ====================
+
 
 @bot.tree.command(name="create-meeting", description="Create a new study meeting")
 @app_commands.describe(
@@ -401,7 +400,7 @@ async def cancel_meeting(interaction: discord.Interaction, meeting_id: int):
     await interaction.response.send_message(f"✅ Meeting {meeting_id} cancelled.", ephemeral=True)
 
 
-# ==================== TASK COMMANDS ====================
+
 
 priority_choices = [
     app_commands.Choice(name="🔴 High", value="High"),
@@ -587,7 +586,6 @@ async def delete_task(interaction: discord.Interaction, task_id: int):
     await interaction.response.send_message(f"✅ Task {task_id} deleted!", ephemeral=True)
 
 
-# ==================== FUN COMMANDS ====================
 
 
 
