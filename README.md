@@ -1,4 +1,4 @@
-# dbot — Study Manager Discord Bot
+# dbot - Study Manager Discord Bot
 
 A Discord bot for organizing study group meetings and team tasks. Built with `discord.py` and PostgreSQL, it lets students schedule meetings (online or on-campus), track attendees, assign prioritized tasks, and get automatic 24-hour meeting reminders.
 
@@ -90,10 +90,6 @@ pip install discord.py asyncpg
 - Dates: `DD-MM-YYYY` (e.g. `25-12-2026`)
 - Times: `HH:MM` in 24-hour format (e.g. `14:30`)
 
-## Security Note
-
-**Do not commit your bot token or database password to GitHub.** If either has already been pushed, regenerate the token in the Discord Developer Portal and rotate the database password immediately. Add a `.gitignore` entry for any local config files and use environment variables (or a `.env` file with `python-dotenv`) instead.
-
 ## Project Structure
 
 ```
@@ -105,4 +101,4 @@ dbot/
 
 ## License
 
-MIT — feel free to fork and adapt for your own study group.
+MIT - feel free to fork and adapt for your own study group.
