@@ -10,13 +10,13 @@ load_dotenv()
 
 TOKEN = os.getenv('DISCORD_TOKEN')
 
-conn = psycopg2.connect(
-    host=os.getenv("DB_HOST"),
-    port=os.getenv("DB_PORT"),
-    database=os.getenv("DB_NAME"),
-    user=os.getenv("DB_USER"),
-    password=os.getenv("DB_PASSWORD")
-)
+DB_CONFIG = {
+    "host": os.getenv("DB_HOST"),
+    "port": os.getenv("DB_PORT"),
+    "database": os.getenv("DB_NAME"),
+    "user": os.getenv("DB_USER"),
+    "password": os.getenv("DB_PASSWORD"),
+}
 
 async def get_db():
     return await asyncpg.connect(**DB_CONFIG)
@@ -589,9 +589,7 @@ async def delete_task(interaction: discord.Interaction, task_id: int):
 
 # ==================== FUN COMMANDS ====================
 
-@bot.tree.command(name="ping", description="Test if bot is working")
-async def ping(interaction: discord.Interaction):
-    await interaction.response.send_message("🏓 Pong! Bot is working!")
+
 
 @bot.tree.command(name="ping", description="Test if bot is working")
 async def ping(interaction: discord.Interaction):
