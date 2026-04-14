@@ -1,17 +1,22 @@
+
 import discord
 from discord import app_commands
 from discord.ext import tasks
 from datetime import datetime, timedelta
 import asyncpg
+import os
+from dotenv import load_dotenv
 
-TOKEN = 'REMOVED'
+load_dotenv()
+
+TOKEN = os.getenv('DISCORD_TOKEN')
 
 DB_CONFIG = {
-    'host': 'localhost',
-    'port': 5432,
-    'database': 'study_manager',
-    'user': 'postgres',
-    'password': '252006'  
+    "host": os.getenv("DB_HOST"),
+    "port": os.getenv("DB_PORT"),
+    "database": os.getenv("DB_NAME"),
+    "user": os.getenv("DB_USER"),
+    "password": os.getenv("DB_PASSWORD"),
 }
 
 async def get_db():
@@ -589,8 +594,56 @@ async def delete_task(interaction: discord.Interaction, task_id: int):
 async def ping(interaction: discord.Interaction):
     await interaction.response.send_message("🏓 Pong! Bot is working!")
 
-@bot.tree.command(name="claudiu", description="easter egg")
-async def claudiu(interaction: discord.Interaction):
-    await interaction.response.send_message("You have a fatass")
+@bot.tree.command(name="ping", description="Test if bot is working")
+async def ping(interaction: discord.Interaction):
+    await interaction.response.send_message("🏓 Pong! Bot is working!")
+
+
+@bot.tree.command(name="commands", description="Display all available bot commands")
+async def commands(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="🤖 Bot Commands",
+        description="Here are all available commands for this bot:",
+        color=discord.Color.purple()
+    )
+
+    # Meeting Commands
+    embed.add_field(
+        name="📅 Meeting Commands",
+        value=(
+            "`/create-meeting` - Create a new study meeting\n"
+            "`/list-meetings` - View all upcoming meetings\n"
+            "`/join-meeting` - Join a meeting by ID\n"
+            "`/cancel-meeting` - Cancel your meeting"
+        ),
+        inline=False
+    )
+
+    # Task Commands
+    embed.add_field(
+        name="📋 Task Commands",
+        value=(
+            "`/add-task` - Create a new task\n"
+            "`/list-tasks` - View all tasks (filter by status)\n"
+            "`/complete-task` - Mark a task as completed\n"
+            "`/delete-task` - Delete a task"
+        ),
+        inline=False
+    )
+
+    # Utility Commands
+    embed.add_field(
+        name="🛠️ Utility Commands",
+        value=(
+            "`/commands` - Display this help message\n"
+            "`/ping` - Test if bot is working"
+        ),
+        inline=False
+    )
+
+    embed.set_footer(text="Study Manager Bot | Need help with a specific command? Just try it!")
+
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
 
 bot.run(TOKEN)
