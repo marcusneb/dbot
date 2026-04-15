@@ -1,14 +1,17 @@
 # dbot - Study Manager Discord Bot
 
+Univeristy group-work usually starts on discord, and ends up on other apps for organizing the tasks, meetings etc. So I figured I should solve this problem somehow.
+Here's my approach:
+
 A Discord bot for organizing study group meetings and team tasks. Built with `discord.py` and PostgreSQL, it lets students schedule meetings (online or on-campus), track attendees, assign prioritized tasks, and get automatic 24-hour meeting reminders.
 
 ## Features
 
-- **Meeting management** — create, list, join, and cancel study meetings with date/time validation and online or on-campus locations.
-- **Task management** — assign tasks to members with due dates, priority levels (High / Medium / Low), and status tracking (Pending / Completed).
-- **Automatic reminders** — a background task runs every minute and pings `@everyone` in the meeting's channel 24 hours before it starts.
-- **Slash commands** — all commands use Discord's native `/` command interface.
-- **Rich embeds** — responses use color-coded embeds with emojis for readability.
+- **Meeting management** - create, list, join, and cancel study meetings with date/time validation and online or on-campus locations.
+- **Task management** - assign tasks to members with due dates, priority levels (High / Medium / Low), and status tracking (Pending / Completed).
+- **Automatic reminders** - a background task runs every minute and pings `@everyone` in the meeting's channel 24 hours before it starts.
+- **Slash commands** - all commands use Discord's native `/` command interface.
+- **Rich embeds** - responses use color-coded embeds with emojis for readability.
 
 ## Commands
 
